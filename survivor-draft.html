@@ -1,13 +1,240 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Survivor Live Snake Draft</title>
+<meta charset="UTF-8">
+<title>Survivor Live Snake Draft</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+body {
+  font-family: Arial, sans-serif;
+  margin:0;
+  background:#111;
+  color:white;
+}
+header {
+  text-align:center;
+  padding:1rem;
+  background:#222;
+  font-size:1.4rem;
+  font-weight:bold;
+}
+.container { padding:1rem; max-width:1000px; margin:auto; }
+
+input, button {
+  padding:0.8rem;
+  margin:0.5rem 0;
+  width:100%;
+  font-size:1rem;
+  border:none;
+  border-radius:6px;
+}
+
+button {
+  background:#e0a800;
+  color:black;
+  font-weight:bold;
+}
+
+.player-grid {
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(120px,1fr));
+  gap:8px;
+  margin-top:1rem;
+}
+
+.player {
+  background:#333;
+  padding:0.6rem;
+  border-radius:6px;
+  text-align:center;
+  cursor:pointer;
+}
+
+.player.taken {
+  background:#555;
+  text-decoration:line-through;
+  cursor:not-allowed;
+}
+
+.board {
+  overflow-x:auto;
+  margin-top:1rem;
+}
+
+table {
+  width:100%;
+  border-collapse:collapse;
+}
+
+th, td {
+  border:1px solid #444;
+  padding:0.5rem;
+  text-align:center;
+}
+
+.current-turn {
+  color:#e0a800;
+  font-weight:bold;
+}
+.hidden { display:none; }
+</style>
 </head>
 <body>
-    <h1>Survivor Live Snake Draft Application</h1>
-    <p>Welcome to the Survivor Live Snake Draft application!</p>
-    <!-- Additional application code goes here -->
+
+<header>🔥 Survivor Live Snake Draft 🔥</header>
+
+<div class="container">
+
+<div id="setup">
+<input type="text" id="roomId" placeholder="Enter Draft Room Name">
+<input type="number" id="teamCount" min="5" max="8" placeholder="Number of Teams (5–8)">
+<textarea id="playerInput" rows="6" placeholder="Paste your 50 player names, one per line"></textarea>
+<button onclick="createRoom()">Create / Join Draft</button>
+</div>
+
+<div id="draftArea" class="hidden">
+<h2 id="turnDisplay"></h2>
+
+<div class="board">
+<table id="draftBoard"></table>
+</div>
+
+<h3>Available Players</h3>
+<div class="player-grid" id="playerGrid"></div>
+
+</div>
+</div>
+
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js"></script>
+
+<script>
+// 🔥 PASTE YOUR FIREBASE CONFIG HERE
+const firebaseConfig = {
+  apiKey: "PASTE",
+  authDomain: "PASTE",
+  databaseURL: "PASTE",
+  projectId: "PASTE",
+  storageBucket: "PASTE",
+  messagingSenderId: "PASTE",
+  appId: "PASTE"
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+let roomRef;
+let roomData;
+
+const totalRounds = 6;
+
+function createRoom() {
+  const roomId = document.getElementById("roomId").value.trim();
+  const teamCount = parseInt(document.getElementById("teamCount").value);
+  const players = document.getElementById("playerInput").value
+                    .split("\n")
+                    .map(p=>p.trim())
+                    .filter(p=>p);
+
+  if (!roomId || !teamCount || players.length === 0) {
+    alert("Fill all fields");
+    return;
+  }
+
+  roomRef = db.ref("rooms/" + roomId);
+
+  roomRef.once("value").then(snapshot => {
+    if (!snapshot.exists()) {
+      roomRef.set({
+        teamCount,
+        teams: Array.from({length:teamCount},(_,i)=>"Team "+(i+1)),
+        players,
+        picks: [],
+        currentPick: 0
+      });
+    }
+  });
+
+  roomRef.on("value", snapshot => {
+    roomData = snapshot.val();
+    loadDraft();
+  });
+
+  document.getElementById("setup").classList.add("hidden");
+  document.getElementById("draftArea").classList.remove("hidden");
+}
+
+function loadDraft() {
+  buildBoard();
+  buildPlayers();
+  updateTurn();
+}
+
+function buildBoard() {
+  let html = "<tr><th>Round</th>";
+  roomData.teams.forEach(t => html += `<th>${t}</th>`);
+  html += "</tr>";
+
+  for (let r=0;r<totalRounds;r++) {
+    html += `<tr><td>${r+1}</td>`;
+    for (let c=0;c<roomData.teamCount;c++) {
+      const index = r*roomData.teamCount+c;
+      html += `<td>${roomData.picks[index] || ""}</td>`;
+    }
+    html += "</tr>";
+  }
+
+  document.getElementById("draftBoard").innerHTML = html;
+}
+
+function buildPlayers() {
+  const grid = document.getElementById("playerGrid");
+  grid.innerHTML = "";
+
+  roomData.players.forEach(player => {
+    const taken = roomData.picks.includes(player);
+    const div = document.createElement("div");
+    div.className = "player" + (taken ? " taken" : "");
+    div.innerText = player;
+
+    if (!taken) {
+      div.onclick = () => draftPlayer(player);
+    }
+
+    grid.appendChild(div);
+  });
+}
+
+function draftPlayer(player) {
+  const nextPick = roomData.currentPick;
+  if (nextPick >= totalRounds * roomData.teamCount) return;
+
+  const newPicks = roomData.picks || [];
+  newPicks[nextPick] = player;
+
+  roomRef.update({
+    picks: newPicks,
+    currentPick: nextPick + 1
+  });
+}
+
+function updateTurn() {
+  const pick = roomData.currentPick;
+  if (pick >= totalRounds * roomData.teamCount) {
+    document.getElementById("turnDisplay").innerText = "Draft Complete!";
+    return;
+  }
+
+  const round = Math.floor(pick / roomData.teamCount);
+  const pos = pick % roomData.teamCount;
+  const snakeIndex = (round % 2 === 0) ? pos : (roomData.teamCount - 1 - pos);
+
+  document.getElementById("turnDisplay").innerHTML =
+    `<span class="current-turn">Round ${round+1} — ${roomData.teams[snakeIndex]} picking</span>`;
+}
+
+</script>
+
 </body>
 </html>
